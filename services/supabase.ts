@@ -1,139 +1,304 @@
+import { createClient } from '@supabase/supabase-js';
+import { Room, User, Booking, Payment, DashboardStats } from '../types';
 
-import { Room, User, Booking, Payment } from '../types';
+// Initialize Supabase client
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// --- MOCK DATA ---
-
-const mockUsers: User[] = [
-  { id: 'u1', full_name: 'Rahul Sharma', email: 'rahul@example.com', phone: '+91 9876543210', role: 'client', status: 'Active', created_at: '2023-01-15', total_bookings: 12, total_spent: 45000 },
-  { id: 'u2', full_name: 'Anjali Gupta', email: 'anjali@example.com', phone: '+91 9123456789', role: 'client', status: 'Active', created_at: '2023-03-20', total_bookings: 5, total_spent: 18500 },
-  { id: 'u3', full_name: 'Vikram Singh', email: 'vikram@example.com', phone: '+91 8888877777', role: 'client', status: 'Blocked', created_at: '2023-06-10', total_bookings: 2, total_spent: 3200 },
-  { id: 'u4', full_name: 'Priya Patel', email: 'priya@example.com', phone: '+91 7777766666', role: 'client', status: 'Active', created_at: '2023-08-05', total_bookings: 8, total_spent: 22000 },
-];
-
-const mockRooms: Room[] = [
-  { id: 'r1', roomname: 'Superior Room 101', roomtype: 'Single', price: 1500, capacity: 1, status: 'Available', amenities: ['WiFi', 'AC', 'TV'], images: ['https://images.unsplash.com/photo-1631049307264-da0ec9d70304'] },
-  { id: 'r2', roomname: 'Luxury Suite 202', roomtype: 'Suite', price: 4500, capacity: 2, status: 'Booked', amenities: ['WiFi', 'AC', 'TV', 'Mini Bar'], images: ['https://images.unsplash.com/photo-1590490360182-c33d57733427'] },
-  { id: 'r3', roomname: 'Deluxe King 305', roomtype: 'Deluxe', price: 3200, capacity: 3, status: 'Available', amenities: ['WiFi', 'AC'], images: ['https://images.unsplash.com/photo-1566665797739-1674de7a421a'] },
-];
-
-let bookingsList: Booking[] = [
-  { id: 'b1', user_id: 'u1', room_id: 'r1', check_in: '2023-11-20', check_out: '2023-11-22', total_price: 3000, booking_status: 'Approved', payment_status: 'Paid', created_at: '2023-11-15' },
-  { id: 'b2', user_id: 'u2', room_id: 'r2', check_in: '2023-11-21', check_out: '2023-11-25', total_price: 18000, booking_status: 'Pending', payment_status: 'Pending', created_at: '2023-11-16' },
-  { id: 'b3', user_id: 'u4', room_id: 'r3', check_in: '2023-12-01', check_out: '2023-12-05', total_price: 12800, booking_status: 'Cancelled', payment_status: 'Failed', created_at: '2023-11-18' },
-];
-
-let paymentsList: Payment[] = [
-  { id: 'p1', booking_id: 'b1', user_id: 'u1', room_id: 'r1', amount: 3000, transaction_id: 'TXN882211', payment_status: 'Paid', payment_method: 'Card', created_at: '2023-11-15' },
-  { id: 'p2', booking_id: 'b2', user_id: 'u2', room_id: 'r2', amount: 18000, transaction_id: 'TXN993344', payment_status: 'Pending', payment_method: 'UPI', created_at: '2023-11-16' },
-  { id: 'p3', booking_id: 'b3', user_id: 'u4', room_id: 'r3', amount: 12800, transaction_id: 'TXN112233', payment_status: 'Failed', payment_method: 'UPI', created_at: '2023-11-18' },
-];
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // --- SERVICE IMPLEMENTATION ---
 
 export const mockSupabase = {
   auth: {
     signIn: async (email: string, password?: string) => {
-      await sleep(1000);
-      return { data: { user: { id: 'admin1', email, full_name: 'Admin User', role: 'admin' } }, error: null };
+      // Check if user exists with admin role
+      const { data: user, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', email)
+        .eq('role', 'admin')
+        .single();
+
+      if (error || !user) {
+        return { data: null, error: { message: 'Invalid credentials or not an admin user' } };
+      }
+
+      return { 
+        data: { 
+          user: { 
+            id: user.id, 
+            email: user.email, 
+            full_name: user.full_name, 
+            role: user.role,
+            avatar_url: user.avatar_url
+          } 
+        }, 
+        error: null 
+      };
     }
   },
 
   rooms: {
-    getAll: async () => { await sleep(500); return [...mockRooms]; },
-    getCount: async () => mockRooms.length,
-    getAvailableCount: async () => mockRooms.filter(r => r.status === 'Available').length,
-    create: async (room: any) => { await sleep(500); return { data: { ...room, id: 'r'+Math.random() }, error: null }; },
-    update: async (id: string, updates: any) => { await sleep(500); return { data: updates, error: null }; },
-    delete: async (id: string) => { await sleep(500); return { error: null }; },
-    // Fix: Added optional onProgress callback to match usage in Rooms.tsx and prevent argument count mismatch error
-    uploadImages: async (files: File[], onProgress?: (progress: number) => void) => {
-      if (onProgress) {
-        onProgress(30); await sleep(300);
-        onProgress(60); await sleep(300);
-        onProgress(100); await sleep(200);
-      } else {
-        await sleep(1000);
+    getAll: async (): Promise<Room[]> => {
+      const { data, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
+
+    getCount: async (): Promise<number> => {
+      const { count } = await supabase
+        .from('rooms')
+        .select('*', { count: 'exact', head: true });
+      return count || 0;
+    },
+
+    getAvailableCount: async (): Promise<number> => {
+      const { count } = await supabase
+        .from('rooms')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'Available');
+      return count || 0;
+    },
+
+    create: async (room: Omit<Room, 'id'>) => {
+      const { data, error } = await supabase
+        .from('rooms')
+        .insert([room])
+        .select()
+        .single();
+      return { data, error };
+    },
+
+    update: async (id: string, updates: Partial<Room>) => {
+      const { data, error } = await supabase
+        .from('rooms')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+      return { data, error };
+    },
+
+    delete: async (id: string) => {
+      const { error } = await supabase
+        .from('rooms')
+        .delete()
+        .eq('id', id);
+      return { error };
+    },
+
+    uploadImages: async (files: File[], onProgress?: (progress: number) => void): Promise<string[]> => {
+      const urls: string[] = [];
+      const totalFiles = files.length;
+      
+      for (let i = 0; i < totalFiles; i++) {
+        const file = files[i];
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const filePath = `room-images/${fileName}`;
+
+        const { error } = await supabase.storage
+          .from('images')
+          .upload(filePath, file);
+
+        if (error) {
+          console.error('Upload error:', error);
+          // Use a placeholder if upload fails
+          urls.push('https://via.placeholder.com/400');
+        } else {
+          const { data: publicUrl } = supabase.storage
+            .from('images')
+            .getPublicUrl(filePath);
+          urls.push(publicUrl.publicUrl);
+        }
+
+        if (onProgress) {
+          onProgress(Math.round(((i + 1) / totalFiles) * 100));
+        }
       }
-      return files.map(() => 'https://via.placeholder.com/400');
+      
+      return urls;
     }
   },
 
   bookings: {
-    getAll: async () => {
-      await sleep(800);
-      return bookingsList.map(b => ({
-        ...b,
-        user: mockUsers.find(u => u.id === b.user_id),
-        room: mockRooms.find(r => r.id === b.room_id)
-      }));
+    getAll: async (): Promise<(Booking & { user?: User; room?: Room })[]> => {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          user:users(*),
+          room:rooms(*)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
     },
+
     updateStatus: async (id: string, status: string) => {
-      await sleep(500);
-      bookingsList = bookingsList.map(b => b.id === id ? { ...b, booking_status: status as any } : b);
-      return { error: null };
+      const { error } = await supabase
+        .from('bookings')
+        .update({ booking_status: status })
+        .eq('id', id);
+      return { error };
     },
-    getRecent: async (limit: number) => {
-      const all = await mockSupabase.bookings.getAll();
-      return all.slice(0, limit);
+
+    getRecent: async (limit: number): Promise<(Booking & { user?: User; room?: Room })[]> => {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          user:users(*),
+          room:rooms(*)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+      return data || [];
     }
   },
 
   users: {
-    getAll: async () => {
-      await sleep(800);
-      return [...mockUsers];
+    getAll: async (): Promise<User[]> => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('role', 'client')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
     },
+
     updateStatus: async (id: string, status: 'Active' | 'Blocked') => {
-      await sleep(500);
-      return { error: null };
+      const { error } = await supabase
+        .from('users')
+        .update({ status })
+        .eq('id', id);
+      return { error };
     },
+
     delete: async (id: string) => {
-      await sleep(500);
-      return { error: null };
+      const { error } = await supabase
+        .from('users')
+        .delete()
+        .eq('id', id);
+      return { error };
     }
   },
 
   payments: {
-    getAll: async () => {
-      await sleep(800);
-      return paymentsList.map(p => ({
-        ...p,
-        user: mockUsers.find(u => u.id === p.user_id),
-        room: mockRooms.find(r => r.id === p.room_id)
-      }));
+    getAll: async (): Promise<(Payment & { user?: User; room?: Room })[]> => {
+      const { data, error } = await supabase
+        .from('payments')
+        .select(`
+          *,
+          user:users(*),
+          room:rooms(*)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
     },
+
     refund: async (id: string) => {
-      await sleep(800);
-      paymentsList = paymentsList.map(p => p.id === id ? { ...p, payment_status: 'Refunded' } : p);
-      return { error: null };
+      const { error } = await supabase
+        .from('payments')
+        .update({ payment_status: 'Refunded' })
+        .eq('id', id);
+      return { error };
     }
   },
 
   stats: {
-    getDashboard: async () => {
-      await sleep(1000);
+    getDashboard: async (): Promise<DashboardStats> => {
+      // Get total revenue
+      const { data: paidPayments } = await supabase
+        .from('payments')
+        .select('amount')
+        .eq('payment_status', 'Paid');
+      const totalRevenue = paidPayments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
+
+      // Get monthly revenue (current month)
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      
+      const { data: monthlyPayments } = await supabase
+        .from('payments')
+        .select('amount')
+        .eq('payment_status', 'Paid')
+        .gte('created_at', startOfMonth.toISOString());
+      const monthlyRevenue = monthlyPayments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
+
+      // Get active bookings count
+      const { count: activeBookings } = await supabase
+        .from('bookings')
+        .select('*', { count: 'exact', head: true })
+        .in('booking_status', ['Pending', 'Approved']);
+
+      // Get pending payments total
+      const { data: pendingPaymentsData } = await supabase
+        .from('payments')
+        .select('amount')
+        .eq('payment_status', 'Pending');
+      const pendingPayments = pendingPaymentsData?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
+
+      // Get failed payments count
+      const { count: failedPaymentsCount } = await supabase
+        .from('payments')
+        .select('*', { count: 'exact', head: true })
+        .eq('payment_status', 'Failed');
+
+      // Get room counts
+      const { count: totalRooms } = await supabase
+        .from('rooms')
+        .select('*', { count: 'exact', head: true });
+
+      const { count: availableRooms } = await supabase
+        .from('rooms')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'Available');
+
+      // Get total users count
+      const { count: totalUsers } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('role', 'client');
+
+      // Generate revenue by month (last 6 months)
+      const months = ['Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const revenueByMonth = months.map((month, i) => ({
+        month,
+        amount: Math.floor(Math.random() * 50000) + 25000 // Placeholder - replace with real aggregation
+      }));
+
+      // Generate booking trends (by day of week)
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const bookingTrends = days.map(day => ({
+        day,
+        count: Math.floor(Math.random() * 30) + 10 // Placeholder - replace with real aggregation
+      }));
+
       return {
-        totalRevenue: 845200,
-        monthlyRevenue: 124500,
-        activeBookings: 128,
-        pendingPayments: 45000,
-        failedPaymentsCount: 5,
-        availableRooms: 12,
-        totalRooms: 45,
-        totalUsers: 450,
-        revenueByMonth: [
-          { month: 'Jul', amount: 45000 }, { month: 'Aug', amount: 32000 },
-          { month: 'Sep', amount: 28000 }, { month: 'Oct', amount: 55000 },
-          { month: 'Nov', amount: 72000 }, { month: 'Dec', amount: 84000 },
-        ],
-        bookingTrends: [
-          { day: 'Mon', count: 12 }, { day: 'Tue', count: 19 },
-          { day: 'Wed', count: 15 }, { day: 'Thu', count: 22 },
-          { day: 'Fri', count: 30 }, { day: 'Sat', count: 35 },
-          { day: 'Sun', count: 28 },
-        ]
+        totalRevenue,
+        monthlyRevenue,
+        activeBookings: activeBookings || 0,
+        pendingPayments,
+        failedPaymentsCount: failedPaymentsCount || 0,
+        availableRooms: availableRooms || 0,
+        totalRooms: totalRooms || 0,
+        totalUsers: totalUsers || 0,
+        revenueByMonth,
+        bookingTrends
       };
     }
   }
