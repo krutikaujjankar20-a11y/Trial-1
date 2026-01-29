@@ -1,0 +1,7 @@
+{
+  "name": "Dost Admin Panel",
+  "description": "A comprehensive administration dashboard for the Dost hospitality app, featuring real-time booking management, room inventory control, and financial analytics.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
